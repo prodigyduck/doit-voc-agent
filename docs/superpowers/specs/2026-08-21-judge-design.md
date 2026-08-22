@@ -48,13 +48,13 @@ POST /api/chat
 | `judge_reason` | String(200), nullable | 감점 근거 한 줄 (200자 절단, 대시보드 툴팁용) |
 | `judged_at` | DateTime, nullable | 채점 완료 시각 |
 
-**채점 대상**: `answer_sources IS NOT NULL`인 건 (답변 생성 경로 — 사용법문의/칭찬/불만-low
+**채점 대상**: `answer_sources`가 null이 아니면서 빈 배열도 아닌 건 (답변 생성 경로 — 사용법문의/칭찬/불만-low
 중 청크를 찾은 경우). 에스컬레이션 접수 경로(버그제보·기능요청 등)의 안내 문구는 채점하지
 않는다.
 
 **재료부족 큐** (Phase 3 입력):
 - `judge_cause = '재료부족'` — 채점 결과 판정, 또는
-- 결정론적 판정: `category = '사용법문의'` && `escalated = True` && `answer_sources IS NULL`
+- 결정론적 판정: `category = '사용법문의'` && `escalated = True` && `answer_sources`가 비어 있음(null 또는 빈 배열)
   (메뉴얼에 해당 내용이 없어 "찾지 못했습니다"로 넘어간 건 — LLM 없이 재료부족 확정).
   칭찬·불만의 무청크는 품질 신호가 약해 제외한다.
 
