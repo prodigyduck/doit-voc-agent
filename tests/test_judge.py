@@ -117,6 +117,16 @@ def test_build_judge_prompt_재료_포함():
     assert "--- 02-managing-todos#티켓 삭제하기 ---" in prompt
 
 
+def test_build_judge_prompt_정직한_부정_감점_규칙_포함():
+    class R:
+        voc_text, answer = "CSV 내보내기는 어떻게 하나요?", "메뉴얼에서 찾지 못했습니다."
+        answer_sources = ["02-managing-todos#할 일 삭제하기"]
+    prompt = build_judge_prompt(R())
+    assert "해결책이 출처에 없" in prompt
+    assert "반드시 감점한다" in prompt
+    assert "이 원인으로 판정" in prompt
+
+
 def test_iter_judge_pending_미채점_대상만(db_session_factory):
     from backend.database import SessionLocal  # noqa: F401 — fixture가 엔진 초기화
     db = db_session_factory()
