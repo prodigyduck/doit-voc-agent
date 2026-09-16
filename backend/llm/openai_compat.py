@@ -1,6 +1,8 @@
 """OpenAI 호환 API 기본 구현 — LLM_BASE_URL/LLM_MODEL로 교체 (스펙 §6.3)."""
 from typing import Optional
 
+from langfuse import observe
+
 from backend.llm.base import LLMProvider
 
 
@@ -19,6 +21,7 @@ class OpenAICompatProvider(LLMProvider):
     def name(self) -> str:
         return "openai_compat"
 
+    @observe(as_type="generation", name="llm_generate")
     def generate(self, prompt: str, **kwargs) -> str:
         response = self._client.chat.completions.create(
             model=self._model,

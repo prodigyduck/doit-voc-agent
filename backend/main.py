@@ -12,6 +12,7 @@ from backend.database import SessionLocal, init_database
 from backend.judge import get_judge_provider, run_judge
 from backend.llm import get_llm_provider
 from backend.models import VocRecord
+from backend.observability import get_trace_id, make_trace_handler, tracing_enabled
 from backend.schemas import (
     ChatRequest,
     ChatResponse,
@@ -46,16 +47,22 @@ def create_app(provider=None, session_factory=None) -> FastAPI:
                 status_code=503,
                 detail="LLM이 설정되지 않았습니다. .env의 LLM_API_KEY를 확인하세요.",
             )
+        # Langfuse 활성 시 요청 세션 단위 트레이스 핸들러를 붙인다 (비활성 → None)
+        handler = make_trace_handler(settings, request.session_id) if tracing_enabled(settings) else None
         result = run_agent(
             voc_text=request.voc_text,
             session_id=request.session_id,
             provider=provider,
             session_factory=app.state.session_factory,
+            callbacks=[handler] if handler else None,
         )
         voc_id = result.get("voc_id")
+        trace_id = get_trace_id(handler)
         if settings.judge_enabled and voc_id is not None:
             judge_provider = get_judge_provider(settings, provider)
-            background_tasks.add_task(run_judge, voc_id, judge_provider, app.state.session_factory)
+            background_tasks.add_task(
+                run_judge, voc_id, judge_provider, app.state.session_factory, trace_id
+            )
         return ChatResponse(
             response=result.get("response", ""),
             category=result.get("category", "기타"),

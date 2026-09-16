@@ -12,6 +12,7 @@ from backend.config import Settings
 from backend.llm.base import LLMProvider
 from backend.manual_retrieval import load_manual
 from backend.models import VocRecord
+from backend.observability import score_judge
 
 
 def get_judge_provider(settings: Settings, fallback_provider):
@@ -95,8 +96,11 @@ def build_judge_prompt(record) -> str:
     )
 
 
-def run_judge(voc_id: int, provider: Optional[LLMProvider], session_factory) -> None:
-    """레코드 1건을 채점해 업데이트. 어떤 실패도 조용히 로그로만 남긴다."""
+def run_judge(voc_id: int, provider: Optional[LLMProvider], session_factory, trace_id: Optional[str] = None) -> None:
+    """레코드 1건을 채점해 업데이트. 어떤 실패도 조용히 로그로만 남긴다.
+
+    trace_id가 있으면 Langfuse에 채점 score를 올린다(관측 비활성 시 무시).
+    """
     db = session_factory()
     try:
         record = db.query(VocRecord).filter(VocRecord.id == voc_id).first()
@@ -113,6 +117,7 @@ def run_judge(voc_id: int, provider: Optional[LLMProvider], session_factory) -> 
         record.judge_reason = parsed["reason"]
         record.judged_at = datetime.utcnow()
         db.commit()
+        score_judge(trace_id, parsed)  # 내부에서 실패를 삼키므로 DB 커밋 영향 없음
     except Exception as exc:  # 채점 실패가 서비스를 죽이지 않게 (스펙 §4 폴백)
         print(f"[judge] 채점 실패 voc_id={voc_id}: {exc}")
     finally:

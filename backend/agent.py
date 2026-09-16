@@ -71,8 +71,15 @@ def run_agent(
     session_id: str,
     provider: Optional[LLMProvider] = None,
     session_factory: Optional[Callable] = None,
+    callbacks: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """VOC 하나를 그래프로 처리하고 최종 state를 반환."""
+    """VOC 하나를 그래프로 처리하고 최종 state를 반환.
+
+    callbacks는 Langfuse 등 관측 핸들러용 — 그래프 노드 실행이 기록된다.
+    """
     graph = _compiled_graph(provider, session_factory)
     initial_state: AgentState = {"voc_text": voc_text, "session_id": session_id}
-    return graph.invoke(initial_state)
+    return graph.invoke(
+        initial_state,
+        config={"callbacks": callbacks} if callbacks else None,
+    )

@@ -20,6 +20,11 @@ class Settings:
         self.judge_enabled: bool = os.getenv("JUDGE_ENABLED", "true").lower() in ("1", "true", "yes")
         # 빈 값이면 기존 LLM 프로바이더(모델)를 그대로 채점에 재사용한다
         self.judge_model: str = os.getenv("JUDGE_MODEL", "")
+        # Langfuse 관측 — 플래그가 켜져 있어도 키가 없으면 비활성
+        self.langfuse_enabled: bool = os.getenv("LANGFUSE_ENABLED", "false").lower() in ("1", "true", "yes")
+        self.langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+        self.langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+        self.langfuse_host: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
 
 settings = Settings()
