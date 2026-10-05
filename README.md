@@ -42,6 +42,7 @@ python scripts/e2e_check.py      # E2E (실제 LLM, .env 필요)
 
 ## 관련 문서
 
+- 아키텍처 상세: `docs/ARCHITECTURE.md` (디렉터리 구성, 그래프·채점·관측, 하네스, 테스트 전략)
 - 설계: `docs/superpowers/specs/2026-08-18-doit-voc-agent-design.md`
 - 구현 계획: `docs/superpowers/plans/2026-08-18-doit-voc-agent-mvp.md`
 - 대상 앱: `~/git/doit` (티켓 칸반 보드)
