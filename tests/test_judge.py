@@ -1,7 +1,8 @@
 """judge 모듈 테스트 (스펙 2026-08-21 §4·§9)."""
-from backend.judge import build_judge_prompt, iter_judge_pending, parse_judge, run_judge, should_judge
+from backend.agents import JUDGE_INSTRUCTIONS
+from backend.judge import build_judge_message, iter_judge_pending, parse_judge, run_judge, should_judge
 from backend.models import VocRecord
-from tests.fakes import FakeProvider
+from tests.fakes import FakeModel
 
 VALID = '{"completeness": 4, "accuracy": 5, "fluency": 5, "cause": "재료부족", "reason": "복구 절차가 출처에 없음"}'
 
@@ -67,7 +68,7 @@ def test_run_judge_레코드_저장(db_session_factory):
     record = _add_record(db)
     # 세션을 닫지 않고 유지 - run_judge가 별도 세션을 생성하므로 문제없음
 
-    run_judge(record.id, FakeProvider([VALID]), db_session_factory)
+    run_judge(record.id, FakeModel([VALID]).model, db_session_factory)
 
     db = db_session_factory()
     found = db.query(VocRecord).filter(VocRecord.id == record.id).first()
@@ -79,12 +80,12 @@ def test_run_judge_레코드_저장(db_session_factory):
     assert found.judged_at is not None
 
 
-def test_run_judge_provider_실패는_미채점_유지(db_session_factory):
+def test_run_judge_모델_실패는_미채점_유지(db_session_factory):
     db = db_session_factory()
     record = _add_record(db)
     # 세션을 닫지 않고 유지
 
-    run_judge(record.id, FakeProvider([]), db_session_factory)  # generate가 예외 — 잡아야 함
+    run_judge(record.id, FakeModel([]).model, db_session_factory)  # 모델 호출이 예외 — 잡아야 함
 
     db = db_session_factory()
     found = db.query(VocRecord).filter(VocRecord.id == record.id).first()
@@ -97,34 +98,30 @@ def test_run_judge_에스컬레이션은_llm_호출_없이_스킵(db_session_fac
     record = _add_record(db, answer="접수했습니다.", answer_sources=None, escalated=True)
     # 세션을 닫지 않고 유지
 
-    provider = FakeProvider([])
-    run_judge(record.id, provider, db_session_factory)
+    fake = FakeModel([])
+    run_judge(record.id, fake.model, db_session_factory)
 
     db = db_session_factory()
     found = db.query(VocRecord).filter(VocRecord.id == record.id).first()
     db.close()
     assert found.judge_total is None
-    assert provider.calls == []  # LLM 호출이 없었다 — 스킵이지 예외 삼킴이 아님
+    assert fake.calls == []  # LLM 호출이 없었다 — 스킵이지 예외 삼킴이 아님
 
 
-def test_build_judge_prompt_재료_포함():
+def test_build_judge_message_재료_포함():
     class R:
         voc_text, answer = "티켓을 어떻게 삭제하나요?", "삭제 버튼으로 지울 수 있습니다."
         answer_sources = ["02-managing-todos#티켓 삭제하기"]
-    prompt = build_judge_prompt(R())
-    assert "티켓을 어떻게 삭제하나요?" in prompt
-    assert "삭제 버튼으로 지울 수 있습니다." in prompt
-    assert "--- 02-managing-todos#티켓 삭제하기 ---" in prompt
+    message = build_judge_message(R())
+    assert "티켓을 어떻게 삭제하나요?" in message
+    assert "삭제 버튼으로 지울 수 있습니다." in message
+    assert "--- 02-managing-todos#티켓 삭제하기 ---" in message
 
 
-def test_build_judge_prompt_정직한_부정_감점_규칙_포함():
-    class R:
-        voc_text, answer = "CSV 내보내기는 어떻게 하나요?", "메뉴얼에서 찾지 못했습니다."
-        answer_sources = ["02-managing-todos#할 일 삭제하기"]
-    prompt = build_judge_prompt(R())
-    assert "해결책이 출처에 없" in prompt
-    assert "반드시 감점한다" in prompt
-    assert "이 원인으로 판정" in prompt
+def test_채점_지시문에_정직한_부정_감점_규칙_포함():
+    assert "해결책이 출처에 없" in JUDGE_INSTRUCTIONS
+    assert "반드시 감점한다" in JUDGE_INSTRUCTIONS
+    assert "이 원인으로 판정" in JUDGE_INSTRUCTIONS
 
 
 def test_iter_judge_pending_미채점_대상만(db_session_factory):
@@ -138,59 +135,59 @@ def test_iter_judge_pending_미채점_대상만(db_session_factory):
     assert len(pending) == 1
 
 
-def test_get_judge_provider_미설정시_fallback_재사용(monkeypatch):
+def test_get_judge_model_미설정시_fallback_재사용(monkeypatch):
     from backend import llm as llm_mod
     from backend.config import Settings
-    from backend.judge import get_judge_provider
+    from backend.judge import get_judge_model
 
     def _no_call(*args, **kwargs):
-        raise AssertionError("get_llm_provider가 호출되면 안 됨")
+        raise AssertionError("get_model이 호출되면 안 됨")
 
-    monkeypatch.setattr(llm_mod, "get_llm_provider", _no_call)
+    monkeypatch.setattr(llm_mod, "get_model", _no_call)
     sentinel = object()
     settings = Settings.__new__(Settings)  # .env 로드 회피
     settings.judge_model = ""
     settings.llm_model = "glm-4.7"
-    assert get_judge_provider(settings, sentinel) is sentinel
+    assert get_judge_model(settings, sentinel) is sentinel
 
 
-def test_get_judge_provider_설정시_별도_생성(monkeypatch):
+def test_get_judge_model_설정시_별도_생성(monkeypatch):
     from backend import llm as llm_mod
     from backend.config import Settings
-    from backend.judge import get_judge_provider
+    from backend.judge import get_judge_model
 
     sentinel = object()
-    monkeypatch.setattr(llm_mod, "get_llm_provider", lambda settings, model=None: sentinel)
+    monkeypatch.setattr(llm_mod, "get_model", lambda settings, model=None: sentinel)
     settings = Settings.__new__(Settings)
     settings.judge_model = "glm-4.7-air"
     settings.llm_model = "glm-4.7"
-    assert get_judge_provider(settings, "fallback") is sentinel
+    assert get_judge_model(settings, "fallback") is sentinel
 
 
-def test_get_judge_provider_설정_but_팩토리_None시_fallback(monkeypatch):
+def test_get_judge_model_설정_but_팩토리_None시_fallback(monkeypatch):
     from backend import llm as llm_mod
     from backend.config import Settings
-    from backend.judge import get_judge_provider
+    from backend.judge import get_judge_model
 
-    monkeypatch.setattr(llm_mod, "get_llm_provider", lambda settings, model=None: None)
+    monkeypatch.setattr(llm_mod, "get_model", lambda settings, model=None: None)
     settings = Settings.__new__(Settings)
     settings.judge_model = "glm-4.7-air"
     settings.llm_model = "glm-4.7"
     fallback = object()
-    assert get_judge_provider(settings, fallback) is fallback
+    assert get_judge_model(settings, fallback) is fallback
 
 
-def test_get_judge_provider_동일모델이면_fallback(monkeypatch):
+def test_get_judge_model_동일모델이면_fallback(monkeypatch):
     from backend import llm as llm_mod
     from backend.config import Settings
-    from backend.judge import get_judge_provider
+    from backend.judge import get_judge_model
 
     def _no_call(*args, **kwargs):
-        raise AssertionError("get_llm_provider가 호출되면 안 됨")
+        raise AssertionError("get_model이 호출되면 안 됨")
 
-    monkeypatch.setattr(llm_mod, "get_llm_provider", _no_call)
+    monkeypatch.setattr(llm_mod, "get_model", _no_call)
     sentinel = object()
     settings = Settings.__new__(Settings)
     settings.judge_model = "glm-4.7"
     settings.llm_model = "glm-4.7"
-    assert get_judge_provider(settings, sentinel) is sentinel
+    assert get_judge_model(settings, sentinel) is sentinel

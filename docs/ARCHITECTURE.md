@@ -16,12 +16,13 @@
 
 ```
 doit-voc-agent/
-├── backend/            # FastAPI + LangGraph 백엔드
+├── backend/            # FastAPI + Pydantic AI 백엔드
 │   ├── main.py         # FastAPI 앱 팩토리 + API 엔드포인트
-│   ├── agent.py        # LangGraph 그래프 정의·실행
+│   ├── agent.py        # VOC 파이프라인 정의·실행 (일반 Python 제어흐름)
+│   ├── agents.py       # pydantic-ai Agent 묶음 (classify 구조화 출력 포함)
 │   ├── state.py        # AgentState — 파이프라인 상태 스키마
-│   ├── nodes/          # 그래프 노드 (파일당 하나, make_*_node 팩토리)
-│   ├── llm/            # LLMProvider 추상화 + OpenAI 호환 구현
+│   ├── nodes/          # 파이프라인 단계 (파일당 하나, *_step 함수)
+│   ├── llm/            # pydantic-ai 모델 팩토리 get_model()
 │   ├── models.py       # SQLAlchemy ORM (voc_records 테이블)
 │   ├── schemas.py      # Pydantic 요청/응답 스키마
 │   ├── database.py     # 엔진/세션 (PostgreSQL 기본, 테스트는 SQLite)
@@ -39,7 +40,7 @@ doit-voc-agent/
 │       └── router/     # 라우트 2개 (/, /dashboard)
 ├── manual/             # doit 사용자 메뉴얼 — 답변의 근거 원천
 ├── scripts/            # e2e_check, judge_backfill, lint_manual
-├── tests/              # pytest (LLM 불필요 — FakeProvider)
+├── tests/              # pytest (LLM 불필요 — pydantic-ai FunctionModel 페이크)
 ├── docs/               # 설계 스펙·구현 계획·본 문서
 └── .claude/            # VOC 처리 하네스 (에이전트 4 + 스킬 4)
 ```
@@ -61,12 +62,13 @@ graph TD
 ```
 
 - 라우팅 규칙 (`route_after_classify`): 사용법문의·칭찬, 불만(low) → `retrieve`, 나머지(버그제보·기능요청·불만 medium/high·기타) → `escalate`
-- 그래프와 메뉴얼은 `lru_cache`로 컴파일/로드 1회만 수행 (`_compiled_graph`)
-- 노드는 모두 `make_*_node(의존성)` 팩토리 — LLM provider, 메뉴얼 청크, DB 세션 팩토리를 주입받아 테스트가 쉽다
+- 분기가 하나뿐이라 그래프 라이브러리 없이 일반 Python 제어흐름으로 구성한다. 메뉴얼은 `lru_cache`로 1회만 로드 (`_cached_manual`)
+- 각 단계는 `*_step(state, agents)` 함수 — pydantic-ai Agent 묶음(`agents.py`), 메뉴얼 청크, DB 세션 팩토리를 주입받아 테스트가 쉽다
+- Agent 묶음은 `build_agents(model)`이 모델 객체 단위로 캐시한다. classify는 `result_type=Classification`(Literal 검증) 구조화 출력 사용
 
-| 노드 | 파일 | 역할 |
+| 단계 | 파일 | 역할 |
 |------|------|------|
-| classify | `nodes/classify.py` | 프롬프트로 6유형+3우선순위 JSON 분류. 실패 시 기타/medium 폴백 |
+| classify | `nodes/classify.py` | 구조화 출력으로 6유형+3우선순위 분류. 실패 시 기타/medium 폴백 |
 | retrieve | `nodes/retrieve.py` | `manual_retrieval.search()` 래핑, 상위 3청크 |
 | generate_answer | `nodes/answer.py` | 근거 청크로만 답변 생성. **청크 없으면 LLM 호출 금지 + 에스컬레이션** |
 | escalate | `nodes/escalate.py` | 접수 안내 문구 생성. LLM 실패 시 유형별 정적 문구 |
@@ -75,9 +77,9 @@ graph TD
 
 노드 간 데이터는 `AgentState`(`state.py`, TypedDict)로 전달되며 파이프라인 진행에 따라 점진적으로 채워진다: `voc_text`/`session_id` → `category`/`priority` → `manual_chunks` → `answer`/`answer_sources` → `response` → `voc_id`.
 
-### 3.2 우아한 열화 규칙 (모든 노드 공통)
+### 3.2 우아한 열화 규칙 (모든 단계 공통)
 
-LLM 호출은 반드시 `LLMProvider`(`llm/base.py` ABC) 뒤에서 이뤄진다. 각 노드는 LLM 실패·파싱 실패 시 사용자에게 에러를 노출하지 않고 폴백으로 동작한다: classify → 기타/medium, answer → 고정 안내 문구 + 에스컬레이션, escalate → 정적 문구, save → voc_id 없이 계속. provider가 아예 없으면 `/api/chat`만 503을 반환한다.
+LLM 호출은 반드시 pydantic-ai 모델(`backend/llm.get_model`) 뒤에서 이뤄진다. 각 단계는 LLM 실패·검증 실패 시 사용자에게 에러를 노출하지 않고 폴백으로 동작한다: classify → 기타/medium, answer → 고정 안내 문구 + 에스컬레이션, escalate → 정적 문구, save → voc_id 없이 계속. 모델이 아예 없으면 `/api/chat`만 503을 반환한다.
 
 ### 3.3 메뉴얼 검색 (`backend/manual_retrieval.py`)
 
@@ -109,7 +111,7 @@ DB는 기본 PostgreSQL(`docker compose up -d postgres`). `DATABASE_URL`을 `sql
 | `GET /api/stats` | 통계: 유형별 집계, 미해결 에스컬레이션, 최근 7일, 채점 평균·저점(≤9) 건수, 재료부족 큐 크기 |
 | `GET /health` | LLM 설정 여부 포함 |
 
-앱은 `create_app(provider, session_factory)` 팩토리 — 테스트에서 의존성을 주입한다.
+앱은 `create_app(model, session_factory)` 팩토리 — 테스트에서 의존성을 주입한다.
 
 ### 3.6 LLM-as-a-Judge 채점 (`backend/judge.py`)
 
@@ -122,8 +124,8 @@ DB는 기본 PostgreSQL(`docker compose up -d postgres`). `DATABASE_URL`을 `sql
 
 ### 3.7 관측 (`backend/observability.py`, Langfuse)
 
-- 활성 조건: `LANGFUSE_ENABLED=true` + 공개/비밀 키. 꺼져 있으면 핸들러를 만들지 않아 행동 변화가 없다
-- 활성 시 `/api/chat`마다 세션 단위 트레이스(`voc_pipeline`)를 붙여 그래프 노드 실행이 기록되고, 채점 결과가 트레이스에 `judge_total` score로 업로드된다
+- 활성 조건: `LANGFUSE_ENABLED=true` + 공개/비밀 키. 꺼져 있으면 스팬을 만들지 않아 행동 변화가 없다
+- 활성 시 `/api/chat`마다 OTel 루트 스팬(`voc_pipeline`)이 VOC 처리 전체를 감싸고, `instrument=True`인 pydantic-ai 에이전트 호출이 그 아래에 중첩된다 (langfuse v3는 OTel 네이티브). 채점 결과는 트레이스에 `judge_total` score로 업로드
 - 관측 실패는 콘솔 로그만 남기고 파이프라인에 예외를 전파하지 않는다
 
 ## 4. 프론트엔드 (`frontend/`, Vue 3 + Vite)
@@ -148,17 +150,17 @@ DB는 기본 PostgreSQL(`docker compose up -d postgres`). `DATABASE_URL`을 `sql
 | 에이전트 (`.claude/agents/`) | 책임 | HOW 스킬 |
 |------------------------------|------|----------|
 | manual-writer | 메뉴얼 작성 | manual-authoring |
-| backend-engineer | 그래프/API | voc-pipeline |
+| backend-engineer | 파이프라인/API | voc-pipeline |
 | frontend-engineer | 챗/대시보드 | dashboard-ui |
 | qa-engineer | 품질 게이트 | — |
 
-진행 방식: 요청을 의존 순서(메뉴얼 ↔ LLM 추상화 병렬 → manual_retrieval → 그래프 → API → 프론트 → E2E)에 따라 단위 작업으로 분해하고, 각 작업 완료 시 qa-engineer 게이트(pytest + lint + build)를 통과해야 커밋한다.
+진행 방식: 요청을 의존 순서(메뉴얼 ↔ LLM 추상화 병렬 → manual_retrieval → 파이프라인 → API → 프론트 → E2E)에 따라 단위 작업으로 분해하고, 각 작업 완료 시 qa-engineer 게이트(pytest + lint + build)를 통과해야 커밋한다.
 
 ## 6. 테스트 전략
 
 | 계층 | 도구 | 특징 |
 |------|------|------|
-| 백엔드 단위 | pytest (`tests/`) | LLM 불필요 — `tests/fakes.py`의 `FakeProvider`가 예약 응답을 순서대로 반환. `conftest.py`가 DB를 인메모리 SQLite로 강제하고 Langfuse를 비활성화 |
+| 백엔드 단위 | pytest (`tests/`) | LLM 불필요 — `tests/fakes.py`의 `FakeModel`이 pydantic-ai FunctionModel으로 예약 응답을 순서대로 반환(dict 응답은 구조화 출력). `conftest.py`가 DB를 인메모리 SQLite로 강제하고 Langfuse를 비활성화 |
 | 메뉴얼 구조 | `scripts/lint_manual.py` | 문서 5종 존재, 섹션 중복 금지, troubleshooting 3단 구조(증상/원인/해결), index 링크 검증 |
 | 프론트엔드 | vitest | utils 로직 단위 테스트 (`*.spec.js`) |
 | E2E | `scripts/e2e_check.py` | 실제 LLM으로 대표 VOC 6개 검증 (.env 필요). 분류 기대치 + 에스컬레이션 기대치 확인 |
@@ -173,7 +175,7 @@ DB는 기본 PostgreSQL(`docker compose up -d postgres`). `DATABASE_URL`을 `sql
 |----|--------|------|
 | `DATABASE_URL` | `postgresql://doit:doit@localhost:5432/doit_agent` | docker-compose의 postgres와 일치 |
 | `LLM_PROVIDER` | `openai_compat` | 현재 유일한 구현체 |
-| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | OpenAI 공식 | OpenAI 호환이면 무엇이든 교체 가능. 키 없으면 provider=None → 우아한 열화 |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | OpenAI 공식 | OpenAI 호환이면 무엇이든 교체 가능. 키 없으면 model=None → 우아한 열화 |
 | `JUDGE_ENABLED` | `true` | 채점 on/off |
 | `JUDGE_MODEL` | (빈) | 빈 값이면 답변 모델 재사용 |
 | `LANGFUSE_ENABLED` | `false` | 키 2개와 함께 켜야 활성 |

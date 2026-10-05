@@ -9,11 +9,12 @@
 
 ## 아키텍처
 
-- **백엔드**: FastAPI + LangGraph (조건부 파이프라인) + SQLAlchemy + PostgreSQL
+- **백엔드**: FastAPI + Pydantic AI (순차 파이프라인 + 구조화 분류) + SQLAlchemy + PostgreSQL
 - **LLM**: OpenAI 호환 API (`.env`의 `LLM_BASE_URL`/`LLM_MODEL`로 교체 가능)
   - 채점 설정: `JUDGE_ENABLED`(기본 true)·`JUDGE_MODEL`(기본: 답변 모델과 동일)
 - **프론트엔드**: Vue 3 + Vite (챗 뷰 + VOC 대시보드)
 - **메뉴얼**: `manual/*.md` — 임베딩 없는 간단 검색, 근거 없으면 답변하지 않음
+- **관측**: Langfuse(OTel) — 트레이싱은 기본 비활성, `LANGFUSE_ENABLED=true` + 키 설정 시 활성
 
 ## 빠른 시작
 
@@ -34,7 +35,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 ## 테스트
 
 ```bash
-pytest -q                        # 백엔드 전체 (LLM 불필요 — FakeProvider)
+pytest -q                        # 백엔드 전체 (LLM 불필요 — pydantic-ai FunctionModel 페이크)
 python scripts/lint_manual.py    # 메뉴얼 구조 린트
 cd frontend && npm test          # 프론트엔드
 python scripts/e2e_check.py      # E2E (실제 LLM, .env 필요)

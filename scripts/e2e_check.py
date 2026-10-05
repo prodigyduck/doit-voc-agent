@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.agent import run_agent  # noqa: E402
 from backend.config import settings  # noqa: E402
 from backend.database import SessionLocal, init_database  # noqa: E402
-from backend.judge import JUDGE_CAUSES, get_judge_provider, run_judge  # noqa: E402
-from backend.llm import get_llm_provider  # noqa: E402
+from backend.judge import JUDGE_CAUSES, get_judge_model, run_judge  # noqa: E402
+from backend.llm import get_model  # noqa: E402
 from backend.models import VocRecord  # noqa: E402
 
 # (VOC, 기대 유형(None=무관), 기대 에스컬레이션 여부)
@@ -27,8 +27,8 @@ SCENARIOS = [
 
 
 def main() -> int:
-    provider = get_llm_provider(settings)
-    if provider is None:
+    model = get_model(settings)
+    if model is None:
         print("LLM이 설정되지 않았습니다. .env의 LLM_API_KEY를 확인하세요.")
         return 2
 
@@ -38,7 +38,7 @@ def main() -> int:
         result = run_agent(
             voc_text=voc,
             session_id=f"e2e-{i}",
-            provider=provider,
+            model=model,
             session_factory=SessionLocal,
         )
         category = result.get("category")
@@ -48,7 +48,7 @@ def main() -> int:
         ok_judge = True
         judge_line = ""
         if result.get("answer_sources") and result.get("voc_id"):
-            run_judge(result["voc_id"], get_judge_provider(settings, provider), SessionLocal)
+            run_judge(result["voc_id"], get_judge_model(settings, model), SessionLocal)
             db = SessionLocal()
             try:
                 rec = db.query(VocRecord).filter(VocRecord.id == result["voc_id"]).first()

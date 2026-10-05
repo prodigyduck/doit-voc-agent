@@ -10,16 +10,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import settings  # noqa: E402
 from backend.database import SessionLocal, init_database  # noqa: E402
-from backend.judge import get_judge_provider, iter_judge_pending, run_judge  # noqa: E402
-from backend.llm import get_llm_provider  # noqa: E402
+from backend.judge import get_judge_model, iter_judge_pending, run_judge  # noqa: E402
+from backend.llm import get_model  # noqa: E402
 
 
 def main() -> int:
-    answer_provider = get_llm_provider(settings)
-    if answer_provider is None:
+    answer_model = get_model(settings)
+    if answer_model is None:
         print("LLM이 설정되지 않았습니다. .env의 LLM_API_KEY를 확인하세요.")
         return 2
-    provider = get_judge_provider(settings, answer_provider)
+    model = get_judge_model(settings, answer_model)
 
     init_database()
     db = SessionLocal()
@@ -31,7 +31,7 @@ def main() -> int:
 
     print(f"채점 대상: {len(ids)}건")
     for voc_id in ids:
-        run_judge(voc_id, provider, SessionLocal)
+        run_judge(voc_id, model, SessionLocal)
         print(f"  채점 완료 voc_id={voc_id}")
     print(f"결과: {len(ids)}/{len(ids)} 처리")
     return 0
