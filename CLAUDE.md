@@ -9,7 +9,7 @@ doit-voc-agent는 티켓 칸반 보드 앱 **doit**(`~/git/doit`)의 사용자 V
 
 ## 개발 명령
 
-### 백엔드 (FastAPI + Pydantic AI)
+### 백엔드 (FastAPI + LangGraph)
 ```bash
 docker compose up -d postgres          # PostgreSQL 기동
 source .venv/bin/activate
@@ -33,10 +33,9 @@ python scripts/e2e_check.py            # 실제 LLM으로 대표 VOC 6개 검증
 
 ## 핵심 아키텍처
 
-- 파이프라인: `backend/agent.py` — classify → route(조건부) → retrieve → answer / escalate → respond → save (일반 Python 제어흐름)
-- 에이전트: `backend/agents.py` — pydantic-ai Agent 묶음. classify는 구조화 출력(`Classification` 모델)으로 타입 검증
-- 단계: `backend/nodes/` 파일당 하나, `*_step(state, agents)` 함수
-- LLM: `backend/llm/` — pydantic-ai 모델 팩토리 `get_model()`, OpenAI 호환 기본, `.env`로 교체
+- 그래프: `backend/agent.py` — classify → route(조건부) → retrieve → answer / escalate → respond → save
+- 노드: `backend/nodes/` 파일당 하나, `make_*_node(provider)` 팩토리 패턴
+- LLM: `backend/llm/` — `LLMProvider` ABC, OpenAI 호환 기본, `.env`로 교체
 - 메뉴얼: `manual/*.md` — `##` 섹션이 검색 단위, 임베딩 없는 간단 검색(`backend/manual_retrieval.py`)
 - 환각 방지: 근거 없으면 답변 생성 금지 + 에스컬레이션 (핵심 품질 속성)
 
@@ -47,7 +46,7 @@ python scripts/e2e_check.py            # 실제 LLM으로 대표 VOC 6개 검증
 | 에이전트 (`.claude/agents/`) | 책임 | HOW 스킬 |
 |------------------------------|------|----------|
 | manual-writer | 메뉴얼 작성 | manual-authoring |
-| backend-engineer | 파이프라인/API | voc-pipeline |
+| backend-engineer | 그래프/API | voc-pipeline |
 | frontend-engineer | 챗/대시보드 | dashboard-ui |
 | qa-engineer | 품질 게이트 | — |
 
@@ -56,7 +55,7 @@ python scripts/e2e_check.py            # 실제 LLM으로 대표 VOC 6개 검증
 ## 규칙
 
 - 로그 파일 생성 금지 (콘솔만)
-- LLM 호출은 반드시 pydantic-ai 모델(`backend/llm.get_model`) 뒤에서
+- LLM 호출은 반드시 `LLMProvider` 뒤에서
 - 주석/프롬프트/UI 문구는 한국어
 - 커밋: conventional commits 한국어 제목
 
@@ -64,7 +63,5 @@ python scripts/e2e_check.py            # 실제 LLM으로 대표 VOC 6개 검증
 
 | 날짜 | 내용 |
 |------|------|
-| 2026-10-05 | 오케스트레이션 LangGraph→Pydantic AI 전환, LLM 추상화 일원화 |
-| 2026-10-04 | Langfuse 관측 연결 (OTel 스팬 + 채점 score) |
 | 2026-08-20 | 서비스 대상 앱 tika→doit 전환 (프롬프트·브랜딩·시나리오) |
 | 2026-08-18 | 하네스 초기 구성 (에이전트 4 + 스킬 4) |

@@ -9,10 +9,10 @@ from backend.agent import run_agent
 from backend.config import settings
 from backend.constants import ESCALATION_STATUSES
 from backend.database import SessionLocal, init_database
-from backend.judge import get_judge_model, run_judge
-from backend.llm import get_model
+from backend.judge import get_judge_provider, run_judge
+from backend.llm import get_llm_provider
 from backend.models import VocRecord
-from backend.observability import pipeline_span, trace_id_of
+from backend.observability import get_trace_id, make_trace_handler, tracing_enabled
 from backend.schemas import (
     ChatRequest,
     ChatResponse,
@@ -22,8 +22,8 @@ from backend.schemas import (
 )
 
 
-def create_app(model=None, session_factory=None) -> FastAPI:
-    """앱 팩토리 — 테스트에서 model/session_factory를 주입한다."""
+def create_app(provider=None, session_factory=None) -> FastAPI:
+    """앱 팩토리 — 테스트에서 provider/session_factory를 주입한다."""
     app = FastAPI(title="doit-voc-agent API", version="0.1.0")
 
     app.add_middleware(
@@ -35,32 +35,33 @@ def create_app(model=None, session_factory=None) -> FastAPI:
     )
 
     init_database()
-    app.state.model = model
+    app.state.provider = provider
     app.state.session_factory = session_factory or SessionLocal
 
     @app.post("/api/chat", response_model=ChatResponse)
     def chat(request: ChatRequest, background_tasks: BackgroundTasks):
-        model = app.state.model or get_model(settings)
-        app.state.model = model
-        if model is None:
+        provider = app.state.provider or get_llm_provider(settings)
+        app.state.provider = provider
+        if provider is None:
             raise HTTPException(
                 status_code=503,
                 detail="LLM이 설정되지 않았습니다. .env의 LLM_API_KEY를 확인하세요.",
             )
-        # Langfuse 활성 시 VOC 처리 전체를 감싸는 OTel 스팬 (비활성 → None)
-        with pipeline_span(settings, request.session_id) as span:
-            result = run_agent(
-                voc_text=request.voc_text,
-                session_id=request.session_id,
-                model=model,
-                session_factory=app.state.session_factory,
-            )
-            trace_id = trace_id_of(span)
+        # Langfuse 활성 시 요청 세션 단위 트레이스 핸들러를 붙인다 (비활성 → None)
+        handler = make_trace_handler(settings, request.session_id) if tracing_enabled(settings) else None
+        result = run_agent(
+            voc_text=request.voc_text,
+            session_id=request.session_id,
+            provider=provider,
+            session_factory=app.state.session_factory,
+            callbacks=[handler] if handler else None,
+        )
         voc_id = result.get("voc_id")
+        trace_id = get_trace_id(handler)
         if settings.judge_enabled and voc_id is not None:
-            judge_model = get_judge_model(settings, model)
+            judge_provider = get_judge_provider(settings, provider)
             background_tasks.add_task(
-                run_judge, voc_id, judge_model, app.state.session_factory, trace_id
+                run_judge, voc_id, judge_provider, app.state.session_factory, trace_id
             )
         return ChatResponse(
             response=result.get("response", ""),
@@ -169,8 +170,8 @@ def create_app(model=None, session_factory=None) -> FastAPI:
 
     @app.get("/health")
     def health():
-        model_ready = app.state.model is not None or get_model(settings) is not None
-        return {"status": "ok", "llm_configured": model_ready}
+        provider_ready = app.state.provider is not None or get_llm_provider(settings) is not None
+        return {"status": "ok", "llm_configured": provider_ready}
 
     return app
 

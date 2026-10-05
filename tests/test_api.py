@@ -4,25 +4,24 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 
 from backend.main import create_app
-from tests.fakes import FakeModel
+from tests.fakes import FakeProvider
 
-CLASSIFY_HOWTO = {"category": "사용법문의", "priority": "low"}
-CLASSIFY_BUG = {"category": "버그제보", "priority": "high"}
+CLASSIFY_HOWTO = '{"category": "사용법문의", "priority": "low"}'
+CLASSIFY_BUG = '{"category": "버그제보", "priority": "high"}'
 JUDGE_PERFECT = '{"completeness": 5, "accuracy": 5, "fluency": 5, "cause": "해당없음", "reason": ""}'
 
 
-def make_model(responses):
-    return FakeModel(responses)
+def make_provider(responses):
+    return FakeProvider(responses)
 
 
-def make_app(model, session_factory):
-    """테스트용 앱 생성 — FakeModel 래퍼면 내부 FunctionModel로 언래핑"""
-    inner = getattr(model, "model", model)
-    return create_app(model=inner, session_factory=session_factory)
+def make_app(provider, session_factory):
+    """테스트용 앱 생성"""
+    return create_app(provider=provider, session_factory=session_factory)
 
 
 def test_chat_정상_답변_경로(db_session_factory):
-    app = make_app(model=make_model([
+    app = make_app(provider=make_provider([
         CLASSIFY_HOWTO,
         "완료됨 영역을 펼쳐 보세요.\n📖 출처: 03-ui-guide#완료된 할 일 보기",
         JUDGE_PERFECT,
@@ -41,7 +40,7 @@ def test_chat_정상_답변_경로(db_session_factory):
 
 
 def test_chat_에스컬레이션_경로(db_session_factory):
-    app = make_app(model=make_model([CLASSIFY_BUG, "접수했습니다."]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([CLASSIFY_BUG, "접수했습니다."]), session_factory=db_session_factory)
     client = TestClient(app)
 
     resp = client.post("/api/chat", json={"voc_text": "앱이 꺼져요", "session_id": "s2"})
@@ -51,7 +50,7 @@ def test_chat_에스컬레이션_경로(db_session_factory):
 
 
 def test_chat_빈_텍스트_422(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     resp = client.post("/api/chat", json={"voc_text": "", "session_id": "s"})
     assert resp.status_code == 422
@@ -61,7 +60,7 @@ def test_llm_미설정시_503(monkeypatch, db_session_factory):
     from backend import config
 
     monkeypatch.setattr(config.settings, "llm_api_key", "")
-    app = make_app(model=None, session_factory=db_session_factory)
+    app = make_app(provider=None, session_factory=db_session_factory)
     client = TestClient(app)
     resp = client.post("/api/chat", json={"voc_text": "안녕", "session_id": "s"})
     assert resp.status_code == 503
@@ -69,14 +68,14 @@ def test_llm_미설정시_503(monkeypatch, db_session_factory):
 
 
 def test_vocs_목록_필터(db_session_factory):
-    model = make_model([
+    provider = make_provider([
         CLASSIFY_HOWTO,
         "답변입니다.\n📖 출처: 03-ui-guide#완료된 할 일 보기",
         JUDGE_PERFECT,  # 1번째 채팅(답변 경로)의 백그라운드 채점 응답
         CLASSIFY_BUG,
         "접수했습니다.",
     ])
-    app = make_app(model=model, session_factory=db_session_factory)
+    app = make_app(provider=provider, session_factory=db_session_factory)
     client = TestClient(app)
     client.post("/api/chat", json={"voc_text": "완료한 할 일이 안 보여요", "session_id": "a"})
     client.post("/api/chat", json={"voc_text": "앱이 꺼져요", "session_id": "b"})
@@ -93,14 +92,14 @@ def test_vocs_목록_필터(db_session_factory):
 
 
 def test_voc_단건_조회_404(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     resp = client.get("/api/vocs/9999")
     assert resp.status_code == 404
 
 
 def test_status_토글(db_session_factory):
-    app = make_app(model=make_model([CLASSIFY_BUG, "접수했습니다."]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([CLASSIFY_BUG, "접수했습니다."]), session_factory=db_session_factory)
     client = TestClient(app)
     voc_id = client.post("/api/chat", json={"voc_text": "앱이 꺼져요", "session_id": "s"}).json()["voc_id"]
 
@@ -118,14 +117,14 @@ def test_status_토글(db_session_factory):
 
 
 def test_stats(db_session_factory):
-    model = make_model([
+    provider = make_provider([
         CLASSIFY_HOWTO,
         "답변입니다.\n📖 출처: 03-ui-guide#완료된 할 일 보기",
         JUDGE_PERFECT,  # 1번째 채팅(답변 경로)의 백그라운드 채점 응답
         CLASSIFY_BUG,
         "접수했습니다.",
     ])
-    app = make_app(model=model, session_factory=db_session_factory)
+    app = make_app(provider=provider, session_factory=db_session_factory)
     client = TestClient(app)
     client.post("/api/chat", json={"voc_text": "완료 안 보여요", "session_id": "a"})
     client.post("/api/chat", json={"voc_text": "꺼져요", "session_id": "b"})
@@ -139,7 +138,7 @@ def test_stats(db_session_factory):
 
 
 def test_health(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     resp = client.get("/health")
     assert resp.status_code == 200
@@ -149,7 +148,7 @@ def test_health(db_session_factory):
 def test_chat_응답_후_백그라운드_채점(db_session_factory):
     from backend.models import VocRecord
 
-    app = make_app(model=make_model([
+    app = make_app(provider=make_provider([
         CLASSIFY_HOWTO,
         "티켓 삭제 방법 안내입니다.\n📖 출처: 02-managing-todos#티켓 삭제하기",
         JUDGE_PERFECT,
@@ -172,7 +171,7 @@ def test_chat_채점_비활성화(monkeypatch, db_session_factory):
     from backend.models import VocRecord
 
     monkeypatch.setattr(config.settings, "judge_enabled", False)
-    app = make_app(model=make_model([
+    app = make_app(provider=make_provider([
         CLASSIFY_HOWTO,
         "티켓 삭제 방법 안내입니다.\n📖 출처: 02-managing-todos#티켓 삭제하기",
         JUDGE_PERFECT,  # 채점이 실행되면 이 응답을 소비하여 judge_total=15 기록
@@ -191,7 +190,7 @@ def test_chat_채점_비활성화(monkeypatch, db_session_factory):
 def test_chat_에스컬레이션은_채점_스킵(db_session_factory):
     from backend.models import VocRecord
 
-    app = make_app(model=make_model([
+    app = make_app(provider=make_provider([
         CLASSIFY_BUG,
         "접수했습니다.",
         JUDGE_PERFECT,  # 채점이 실행되면 이 응답을 소비하여 judge_total=15 기록
@@ -222,7 +221,7 @@ def _add_voc_direct(session_factory, **kw):
 
 
 def test_vocs_judge_cause_필터(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     _add_voc_direct(db_session_factory, judge_cause="재료부족", judge_total=8)
     _add_voc_direct(db_session_factory, session_id="d2", judge_cause="과정오류", judge_total=10)
@@ -235,7 +234,7 @@ def test_vocs_judge_cause_필터(db_session_factory):
 
 
 def test_stats_채점_집계(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     _add_voc_direct(db_session_factory, judge_scores={"completeness": 5, "accuracy": 5, "fluency": 4}, judge_total=14, judge_cause="해당없음")
     _add_voc_direct(db_session_factory, session_id="d2", judge_total=8, judge_cause="재료부족")   # 저점수 + 재료부족
@@ -249,7 +248,7 @@ def test_stats_채점_집계(db_session_factory):
 
 
 def test_stats_채점_0건은_null(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     _add_voc_direct(db_session_factory, answer="접수했습니다", answer_sources=None, escalated=True, category="버그제보")
 
@@ -260,7 +259,7 @@ def test_stats_채점_0건은_null(db_session_factory):
 
 
 def test_voc_단건에_채점_필드_노출(db_session_factory):
-    app = make_app(model=make_model([]), session_factory=db_session_factory)
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
     client = TestClient(app)
     _add_voc_direct(db_session_factory, judge_scores={"completeness": 4, "accuracy": 5, "fluency": 5}, judge_total=14, judge_cause="재료부족", judge_reason="복구 절차 없음", judged_at=datetime.utcnow())
 
