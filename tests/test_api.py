@@ -267,3 +267,27 @@ def test_voc_단건에_채점_필드_노출(db_session_factory):
     assert voc["judge_total"] == 14
     assert voc["judge_reason"] == "복구 절차 없음"
     assert voc["judged_at"] is not None
+
+
+def test_vocs_재료부족_필터는_미처리_큐_전체(db_session_factory):
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
+    client = TestClient(app)
+    _add_voc_direct(db_session_factory, judge_cause="재료부족", judge_total=8)  # judge 경로 미처리
+    _add_voc_direct(db_session_factory, session_id="q2", answer="찾지 못했습니다", answer_sources=None, escalated=True)  # 결정론적
+    _add_voc_direct(db_session_factory, session_id="q3", judge_cause="재료부족", judge_total=9, gap_status="resolved")  # 마킹됨
+    _add_voc_direct(db_session_factory, session_id="q4", judge_cause="과정오류", judge_total=10)  # 재료부족 아님
+
+    gaps = client.get("/api/vocs", params={"judge_cause": "재료부족"}).json()
+    ids = {g["session_id"] for g in gaps}
+    assert ids == {"d", "q2"}  # 결정론적 포함 + 마킹 제외
+
+
+def test_stats_마킹_후_재료부족_카운트_감소(db_session_factory):
+    app = make_app(provider=make_provider([]), session_factory=db_session_factory)
+    client = TestClient(app)
+    _add_voc_direct(db_session_factory, judge_cause="재료부족", judge_total=8)  # 미처리
+    _add_voc_direct(db_session_factory, session_id="m2", judge_cause="재료부족", judge_total=9, gap_status="absent")  # 마킹됨
+    _add_voc_direct(db_session_factory, session_id="m3", answer="찾지 못했습니다", answer_sources=None, escalated=True)  # 결정론적 미처리
+
+    stats = client.get("/api/stats").json()
+    assert stats["material_gap_count"] == 2  # 마킹된 m2는 제외

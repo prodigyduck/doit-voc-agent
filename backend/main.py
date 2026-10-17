@@ -9,6 +9,7 @@ from backend.agent import run_agent
 from backend.config import settings
 from backend.constants import ESCALATION_STATUSES
 from backend.database import SessionLocal, init_database
+from backend.gap import is_gap_open
 from backend.judge import get_judge_provider, run_judge
 from backend.llm import get_llm_provider
 from backend.models import VocRecord
@@ -90,6 +91,10 @@ def create_app(provider=None, session_factory=None) -> FastAPI:
                 query = query.filter(VocRecord.escalated == escalated)
             if status:
                 query = query.filter(VocRecord.escalation_status == status)
+            if judge_cause == "재료부족":
+                # 미처리 큐 전체(judge 판정 + 결정론적) — 큐 정의는 gap.is_gap_open 사용 (스펙 2026-08-23 §5)
+                rows = query.all()
+                return [r for r in rows if is_gap_open(r)][:limit]
             if judge_cause:
                 if judge_cause == "미채점":
                     query = query.filter(VocRecord.judge_cause.is_(None))
@@ -151,11 +156,7 @@ def create_app(provider=None, session_factory=None) -> FastAPI:
                 round(sum(r.judge_total for r in judged) / len(judged), 1) if judged else None
             )
             low_score_count = sum(1 for r in judged if r.judge_total <= 9)
-            material_gap_count = sum(1 for r in records if r.judge_cause == "재료부족")
-            material_gap_count += sum(
-                1 for r in records
-                if r.category == "사용법문의" and r.escalated and not r.answer_sources
-            )
+            material_gap_count = sum(1 for r in records if is_gap_open(r))
             return StatsResponse(
                 total=len(records),
                 by_category=by_category,
