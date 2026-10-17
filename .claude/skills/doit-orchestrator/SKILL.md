@@ -26,6 +26,17 @@ doit-voc-agent 개발 작업을 에이전트에 위임하고 품질 게이트로
 3. 각 작업 완료 시 qa-engineer 게이트 (pytest + lint + build) 를 통과해야 커밋
 4. 게이트 실패 시 해당 에이전트에게 수정 위임 후 재검증
 
+## 재료부족 큐 소비 (Phase 3 — 스펙 2026-08-23)
+
+트리거: "큐 처리", "재료부족 큐 소비" 요청.
+
+1. `python scripts/gap_report.py` 로 미처리 큐 리포트 확보 (0건이면 종료 보고)
+2. manual-writer 위임 — 리포트 건별로 doit 코드 근거 수집 (HOW: manual-authoring):
+   - 기능 존재 → `manual/` 적절한 문서의 `##` 섹션 추가·보강 (필요시 doit 실행·Playwright 실동작 확인)
+   - 기능 부재 → `manual/05-faq.md` "제공하지 않는 기능" 항목화
+3. qa-engineer 게이트 + 사용자 리뷰 통과 후 커밋
+4. `python scripts/gap_resolve.py --voc-id <N ...> --status resolved|absent` 마킹, 진행 원장 기록
+
 ## 의존 그래프 (스펙 §7.2)
 
 메뉴얼 ↔ LLM 추상화 (병렬 가능) → manual_retrieval → 그래프 → API → 프론트 → E2E

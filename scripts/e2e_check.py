@@ -1,4 +1,4 @@
-"""실제 LLM으로 대표 VOC 6개를 처리해 MVP 품질 게이트 검증 (스펙 §8 E2E).
+"""실제 LLM으로 대표 VOC 7개를 처리해 MVP 품질 게이트 검증 (스펙 §8 E2E).
 
 사용법: .env 설정 후 `python scripts/e2e_check.py`
 종료 코드: 0 통과 / 1 시나리오 실패 / 2 LLM 미설정
@@ -11,18 +11,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.agent import run_agent  # noqa: E402
 from backend.config import settings  # noqa: E402
 from backend.database import SessionLocal, init_database  # noqa: E402
+from backend.gap import format_gap_report, is_gap_open, iter_gap_open  # noqa: E402
 from backend.judge import JUDGE_CAUSES, get_judge_provider, run_judge  # noqa: E402
 from backend.llm import get_llm_provider  # noqa: E402
 from backend.models import VocRecord  # noqa: E402
 
-# (VOC, 기대 유형(None=무관), 기대 에스컬레이션 여부)
+# (VOC, 기대 유형(None=무관), 기대 에스컬레이션(None=무관), 재료부족 큐 검증)
 SCENARIOS = [
-    ("완료한 티켓이 보드에서 사라졌어요. 어디서 확인하나요?", "사용법문의", False),
-    ("티켓을 어떻게 삭제하나요?", "사용법문의", False),
-    ("완료한 티켓이 사라졌어요", "사용법문의", False),  # 진술형도 안내로 해결
-    ("앱을 켜면 바로 꺼집니다. 고쳐주세요.", "버그제보", True),
-    ("다크 모드도 추가해 주세요.", "기능요청", True),
-    ("화면 테마 색을 분홍색으로 바꾸고 싶어요.", None, True),  # 메뉴얼에 없는 기능 → 에스컬레이션
+    ("완료한 티켓이 보드에서 사라졌어요. 어디서 확인하나요?", "사용법문의", False, False),
+    ("티켓을 어떻게 삭제하나요?", "사용법문의", False, False),
+    ("완료한 티켓이 사라졌어요", "사용법문의", False, False),  # 진술형도 안내로 해결
+    ("앱을 켜면 바로 꺼집니다. 고쳐주세요.", "버그제보", True, False),
+    ("다크 모드도 추가해 주세요.", "기능요청", True, False),
+    ("화면 테마 색을 분홍색으로 바꾸고 싶어요.", None, True, False),  # 메뉴얼에 없는 기능 → 에스컬레이션
+    ("CSV로 할 일 목록을 내보내는 방법은?", "사용법문의", None, True),  # 메뉴얼에 없는 기능 → 재료부족 큐 등재
 ]
 
 
@@ -34,7 +36,7 @@ def main() -> int:
 
     init_database()
     failures = 0
-    for i, (voc, expected_category, expected_escalated) in enumerate(SCENARIOS, 1):
+    for i, (voc, expected_category, expected_escalated, check_gap) in enumerate(SCENARIOS, 1):
         result = run_agent(
             voc_text=voc,
             session_id=f"e2e-{i}",
@@ -44,7 +46,7 @@ def main() -> int:
         category = result.get("category")
         escalated = bool(result.get("escalated"))
         ok_category = expected_category is None or category == expected_category
-        ok_escalated = escalated == expected_escalated
+        ok_escalated = expected_escalated is None or escalated == expected_escalated
         ok_judge = True
         judge_line = ""
         if result.get("answer_sources") and result.get("voc_id"):
@@ -64,7 +66,20 @@ def main() -> int:
                     f"\n       채점={rec.judge_total}/15 원인={rec.judge_cause}"
                     f" (근거: {rec.judge_reason})"
                 )
-        status = "PASS" if (ok_category and ok_escalated and ok_judge) else "FAIL"
+        ok_gap = True
+        gap_line = ""
+        if check_gap and result.get("voc_id"):
+            db = SessionLocal()
+            try:
+                rec = db.query(VocRecord).filter(VocRecord.id == result["voc_id"]).first()
+                on_queue = rec is not None and is_gap_open(rec)
+                report = format_gap_report(iter_gap_open(db))
+            finally:
+                db.close()
+            in_report = f"voc_id={result['voc_id']}" in report
+            ok_gap = on_queue and in_report
+            gap_line = f"\n       재료부족 큐 등재={on_queue} 리포트 포함={in_report}"
+        status = "PASS" if (ok_category and ok_escalated and ok_judge and ok_gap) else "FAIL"
         if status == "FAIL":
             failures += 1
         print(f"[{status}] VOC {i}: {voc}")
@@ -74,6 +89,8 @@ def main() -> int:
         print(f"       출처: {result.get('answer_sources') or []}")
         if judge_line:
             print(judge_line)
+        if gap_line:
+            print(gap_line)
         print()
 
     print(f"결과: {len(SCENARIOS) - failures}/{len(SCENARIOS)} 통과")
