@@ -25,5 +25,8 @@ class VocRecord(Base):
     judge_cause = Column(String(20), nullable=True)  # "재료부족"|"과정오류"|"해당없음"
     judge_reason = Column(String(200), nullable=True)
     judged_at = Column(DateTime, nullable=True)
+    # Phase 3 — 재료부족 큐 처리 상태 (스펙 2026-08-23 §3).
+    # null=미처리, 'resolved'=메뉴얼·FAQ 반영, 'absent'=기능 없음 확인 종결. 'open'은 파생 상태라 저장 안 함
+    gap_status = Column(String(12), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     resolved_at = Column(DateTime, nullable=True)

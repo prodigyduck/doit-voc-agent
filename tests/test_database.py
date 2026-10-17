@@ -75,3 +75,11 @@ def test_엔진_팩토리_파일_sqlite는_커넥션_풀():
 
     memory_engine = _create_engine("sqlite://")
     assert isinstance(memory_engine.pool, StaticPool)
+
+
+def test_gap_status_기본값은_null(db_session):
+    db_session.add(VocRecord(session_id="g1", voc_text="CSV 내보내기 문의", category="사용법문의", priority="low"))
+    db_session.commit()
+
+    found = db_session.query(VocRecord).filter_by(session_id="g1").first()
+    assert found.gap_status is None
